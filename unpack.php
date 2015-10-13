@@ -15,9 +15,9 @@ function vdk_unpack($vdk, $path = '.')
 {
     do {
         $file = unpack('Cis_dir/Z128name/V2size/x4/Voffset', fread($vdk, 145));
+        echo $pathname = $path . '/' . $file['name'], "\n";
         if ($file['is_dir']) {
             if (!file_exists($path)) {
-                echo $path, "\n";
                 if (!@mkdir($path)) {
                     vdk_error();
                     exit(1);
@@ -27,11 +27,10 @@ function vdk_unpack($vdk, $path = '.')
                 vdk_unpack($vdk, $path . '/' . $file['name']);
             }
         } else {
-            echo $tmp = $path . '/' . $file['name'], "\n";
             $data = @gzuncompress(fread($vdk, $file['size2']), $file['size1']);
             if (
                 $data === false
-                or @file_put_contents($tmp, $data) !== $file['size1']
+                or @file_put_contents($pathname, $data) !== $file['size1']
             ) {
                 vdk_error();
             }
