@@ -24,7 +24,7 @@ function vdk_unpack($vdk, $path = '.')
                 }
             }
             if (!in_array($file['name'], ['.', '..'])) {
-                vdk_unpack($vdk, $path . '/' . $file['name']);
+                vdk_unpack($vdk, $pathname);
             }
         } else {
             $data = @gzuncompress(fread($vdk, $file['size2']), $file['size1']);
