@@ -1,99 +1,81 @@
 #!/usr/bin/env php
 <?php
-class VdkHeap extends SplHeap
+function vdk_pack($vdk, $dirname, &$table = [], &$folders = 0, $parent = null)
 {
-    public function __construct(Iterator $iterator)
-    {
-        foreach ($iterator as $file) {
-            if (!preg_match('@^[^/]+/\.\.$@', $file->getPathname())) {
-                $this->insert($file->getPathname());
-            }
-        }
-    }
-
-    public function compare($file1, $file2)
-    {
-        return strcasecmp($file2, $file1);
-    }
-}
-
-if ($argc < 2)
-    exit(1);
-
-$level = max(0, min($argc > 2 ? $argv[2] : 1, 9));
-
-$table = [];
-$folders = 0;
-
-function vdk_pack($vdk, $path, $offsets)
-{
-    global $level, $table, $folders;
-
-    try {
-        $folder = new VdkHeap(new DirectoryIterator($path));
-    } catch (Exception $e) {
-        fprintf(STDERR, "%s: %s\n", $GLOBALS['argv'][0], $e->getMessage());
+    if (!$folder = scandir($dirname)) {
         return;
     }
-
-    $offset = end($offsets);
-    foreach ($folder as $file) {
-        echo $file, "\n";
-        $filename = basename($file);
-        if (is_dir($file)) {
-            $data = '';
+    usort($folder, 'strcasecmp');
+    if (is_null($parent)) {
+        array_splice($folder, 1, 1);
+    }
+    $current = ftell($vdk);
+    $last = count($folder) - 1;
+    foreach ($folder as $i => $filename) {
+        echo $pathname = "$dirname/$filename", "\n";
+        if (is_dir($pathname)) {
+            $start = ftell($vdk);
+            fseek($vdk, 145, SEEK_CUR);
             if (!in_array($filename, ['.', '..'])) {
-                $data = vdk_pack(
-                    $vdk,
-                    $file,
-                    array_merge($offsets, [$offset + 145])
-                );
+                vdk_pack($vdk, $pathname, $table, $folders, $current);
                 $folders++;
             }
-            $chunks[] = pack(
+            $end = ftell($vdk);
+            fseek($vdk, $start);
+            fwrite($vdk, pack(
                 'Ca128V4',
                 1,
                 $filename,
                 0,
                 0,
-                $filename == '..' ? prev($offsets) : ($filename == '.' ? $offset : $offset + 145),
-                $folder->count() == 1 ? 0 : $offset + 145 + strlen($data)
-            ) . $data;
+                $filename == '..' ? $parent : $start + (
+                    $filename == '.' ? 0 : 145
+                ),
+                $i == $last ? 0 : $end
+            ));
+            fseek($vdk, $end);
         } else {
-            $data = gzcompress(file_get_contents($file), $level);
-            $chunks[] = pack(
+            $table[$pathname] = ftell($vdk);
+            $data = gzcompress(file_get_contents($pathname), $GLOBALS['level']);
+            fwrite($vdk, pack(
                 'Ca128V4',
                 0,
-                basename($file),
-                filesize($file),
-                strlen($data),
+                $filename,
+                filesize($pathname),
+                $size = strlen($data),
                 0,
-                $folder->count() == 1 ? 0 : $offset + 145 + strlen($data)
-            ) . $data;
-            $table[$file] = $offset;
+                $i == $last ? 0 : $table[$pathname] + 145 + $size
+            ) . $data);
         }
-        $offset += 145 + strlen($data);
     }
-    return implode($chunks);
 }
 
-if (!$vdk = @fopen(basename($argv[1]) . '.yolo.vdk', 'wb')) {
+if ($argc < 2) {
+    fprintf(STDERR, "Usage: %s folder [level]\n", $argv[0]);
     exit(1);
 }
 
-$data = vdk_pack($vdk, $argv[1], [28]);
+$dirname = rtrim($argv[1], '/');
+$level = max(0, min($argc > 2 ? $argv[2] : 1, 9));
 
-$data = pack(
-    'a8x4V4',
-    'VDISK1.1',
-    $count = count($table),
-    $folders,
-    strlen($data) - 117,
-    $count * 264 + 4
-) . $data . pack('V', $count);
+$vdk = fopen(basename($dirname) . '.repack.vdk', 'wb') or exit(1);
 
-foreach ($table as $file => $offset) {
-    $data .= pack('a260V', strtoupper(substr(strstr($file, '/'), 1)), $offset);
+fseek($vdk, 28);
+vdk_pack($vdk, $dirname, $table, $folders);
+$size = ftell($vdk) - 145;
+
+$files = count($table);
+fwrite($vdk, pack('V', $files));
+foreach ($table as $pathname => $offset) {
+    fwrite(
+        $vdk,
+        pack('a260V', strtoupper(substr(strstr($pathname, '/'), 1)), $offset)
+    );
 }
 
-file_put_contents(basename($argv[1]) . '.yolo.vdk', $data);
+rewind($vdk);
+fwrite(
+    $vdk,
+    pack('a8x4V4', 'VDISK1.1', $files, $folders, $size, $files * 264 + 4)
+);
+fclose($vdk);
