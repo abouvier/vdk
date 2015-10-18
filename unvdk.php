@@ -1,39 +1,22 @@
 #!/usr/bin/env php
 <?php
-function vdk_error($message = null)
-{
-    if (is_null($message)) {
-        $last = error_get_last();
-        $message = isset($last['message']) ? $last['message'] : 'unknown error';
-    } else {
-        $message = vsprintf($message, array_slice(func_get_args(), 1));
-    }
-    fprintf(STDERR, "%s: %s\n", $GLOBALS['argv'][0], $message);
-}
-
-function vdk_unpack($vdk, $path = '.')
+function vdk_unpack($vdk, $dirname)
 {
     do {
         $file = unpack('Cis_dir/Z128name/V2size/x4/Voffset', fread($vdk, 145));
-        echo $pathname = $path . '/' . $file['name'], "\n";
+        echo $pathname = $dirname . '/' . $file['name'], "\n";
         if ($file['is_dir']) {
-            if (!file_exists($path)) {
-                if (!@mkdir($path)) {
-                    vdk_error();
-                    exit(1);
-                }
+            if (!file_exists($dirname)) {
+                mkdir($dirname);
             }
             if (!in_array($file['name'], ['.', '..'])) {
                 vdk_unpack($vdk, $pathname);
             }
         } else {
-            $data = @gzuncompress(fread($vdk, $file['size2']), $file['size1']);
-            if (
-                $data === false
-                or @file_put_contents($pathname, $data) !== $file['size1']
-            ) {
-                vdk_error();
-            }
+            file_put_contents(
+                $pathname,
+                gzuncompress(fread($vdk, $file['size2']), $file['size1'])
+            );
         }
     } while ($file['offset']);
 }
@@ -43,22 +26,17 @@ if ($argc < 2) {
     exit(1);
 }
 
-if (!$vdk = @fopen($argv[1], 'rb')) {
-    vdk_error();
-    exit(1);
-}
+$vdk = fopen($argv[1], 'rb') or exit(1);
 
-$header = unpack('Z8version/x4/Vfiles/Vfolders/Vsize', fread($vdk, 24));
-switch ($header['version']) {
-    case 'VDISK1.0':
-        break;
-    case 'VDISK1.1':
-        if (unpack('V', fread($vdk, 4))[1] == $header['files'] * 264 + 4) {
-            break;
-        }
-    default:
-        vdk_error('%s is not a valid VDK file', $argv[1]);
-        exit(1);
+$header = unpack('Z8version/Vmagic/Vfiles/Vfolders/Vsize', fread($vdk, 24));
+
+if (!($header['version'] == 'VDISK1.0' and $header['magic'] == 4294967040) and
+    !($header['version'] == 'VDISK1.1' and
+        unpack('V', fread($vdk, 4))[1] == $header['files'] * 264 + 4
+    )
+) {
+    fprintf(STDERR, "%s: %s: invalid vdkfile\n", $argv[0], $argv[1]);
+    exit(1);
 }
 
 printf(
