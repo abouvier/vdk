@@ -1,6 +1,6 @@
 # VDK
 
-VDK file packer/unpacker in PHP.
+VDK file packer/unpacker for PHP.
 
 ## Unpack
 
